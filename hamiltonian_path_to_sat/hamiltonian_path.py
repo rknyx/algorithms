@@ -22,12 +22,10 @@ import sys
 from itertools import combinations, product, starmap
 
 VERTEX_COUNT = None
-ALL_VERTICES = {}
 
-
-def get_counts():
-    return tuple(map(int, sys.stdin.readline().split(" ")))
-
+UNSATISFIABLE_SOLUTION = "2 1\n1 0\n-1 0"
+SATISFIABLE_SOLUTION = "1 1\n1 -1 0"
+PREDEFINED_SOLUTIONS = [UNSATISFIABLE_SOLUTION, SATISFIABLE_SOLUTION]
 
 def process_input(lines=None):
     global VERTEX_COUNT
@@ -35,7 +33,17 @@ def process_input(lines=None):
         lines = sys.stdin.readlines()
     counts = tuple(map(int, lines[0].split(" ")))
     VERTEX_COUNT = counts[0]
-    return counts, (tuple(map(int, x.split(" "))) for x in lines[1:])
+
+    # filter duplicated or reversed edges (small optimization of clauses count)
+    edges = set()
+    res = []
+    for line in lines[1:]:
+        left, right = map(int, line.split(" "))
+        _set = frozenset([left, right])
+        if _set in edges:
+            continue
+        res.append((left, right))
+    return counts, res
 
 
 def get_variable(vertex_num, position):
@@ -46,151 +54,62 @@ def get_bunch_of_variables(vertex_nums, positions):
     return starmap(get_variable, product(vertex_nums, positions))
 
 
-def neighbors(pos, num):
-    if pos == 0:
-        return pos + 1,
-    elif pos == num - 1:
-        return pos - 1,
-    else:
-        return pos - 1, pos + 1
-
-
-def neighboring_positions(_num):
-    return (neighbors(pos, _num) for pos in range(_num))
-
-
 def res_to_string(res):
     _res = "%s %s\n" % (len(res), VERTEX_COUNT * VERTEX_COUNT)
+    # _res = "%s %s\n" % (VERTEX_COUNT * VERTEX_COUNT, len(res))
     _res += "\n".join((" ".join(map(str, expression + [0])) for expression in res))
     return _res
 
 
 def generate_expressions(counts, input_generator):
     vertices_count, edges_count = counts
+    if edges_count == 0:
+        return UNSATISFIABLE_SOLUTION if vertices_count > 1 else SATISFIABLE_SOLUTION
+
     res = []
     _g = get_variable
 
-    # each vertex has at least one position
-    res += [list(get_bunch_of_variables([vertex_num], range(vertices_count))) for vertex_num in range(1, vertices_count+1)]
+    # each vertex has at least one position (1)
+    res += [list(get_bunch_of_variables([vertex_num], range(vertices_count))) for vertex_num in range(1, vertices_count + 1)]
 
-    # vertex can't have two positions
+    # vertex can't have two positions (max 435 * 30 = 13000)
     for vertex_num in range(1, vertices_count + 1):
         res += ([[-_g(vertex_num, pair[0]), -_g(vertex_num, pair[1])] for pair in combinations(range(vertices_count), 2)])
 
-    # each position is occupied by one vertex
-    for position_num in range(vertices_count):
-        pairwise_combs = combinations((_g(x, position_num) for x in range(1, vertices_count + 1)), 2)
-        res += ([-x[0], -x[1]] for x in pairwise_combs)
+    # each position is occupied by at least one vertex
+    for pos_num in range(vertices_count):
+        res.append([get_variable(vertex_num, pos_num) for vertex_num in range(1, vertices_count + 1)])
 
-    # only neighbors can lead one after another
-    neighbors = {}
+
+    adjacency = {}
     all_vertices = set()
 
     for left, right in input_generator:
         all_vertices.add(left)
         all_vertices.add(right)
-        if left not in neighbors:
-            neighbors[left] = {right}
+        if left not in adjacency:
+            adjacency[left] = {right}
         else:
-            neighbors[left].add(right)
-        if right not in neighbors:
-            neighbors[right] = {left}
+            adjacency[left].add(right)
+        if right not in adjacency:
+            adjacency[right] = {left}
         else:
-            neighbors[right].add(left)
+            adjacency[right].add(left)
 
-    for vertex in (_v for _v in all_vertices if _v in neighbors):
-        for position_num, neighbors_positions in enumerate(neighboring_positions(vertices_count)):
-            curr_variable = get_variable(vertex, position_num)
-            non_neighbor_variables = get_bunch_of_variables(all_vertices - neighbors[vertex] - {vertex}, neighbors_positions)
-            res += ([-curr_variable, -non_neighbor] for non_neighbor in non_neighbor_variables)
-
+    # neighbors should follow neighbors
+    for vertex_num in range(1, vertices_count + 1):
+        if vertex_num not in adjacency:
+            return UNSATISFIABLE_SOLUTION
+        adjacent = adjacency[vertex_num]
+        for pos_num in range(vertices_count - 1):
+            curr_variable = get_variable(vertex_num, pos_num)
+            res.append([-curr_variable] + [get_variable(x, pos_num + 1) for x in adjacent])
     return res
 
 
-def test_lines_1():
-    return """30 80
-1 9
-1 10
-1 16
-1 20
-2 23
-3 7
-3 22
-4 22
-4 30
-5 3
-5 9
-5 18
-5 25
-6 4
-6 22
-6 27
-7 2
-7 20
-7 26
-8 16
-8 26
-9 5
-9 6
-9 13
-10 24
-11 2
-11 16
-11 17
-11 27
-12 8
-12 29
-13 4
-13 6
-13 9
-13 12
-13 15
-13 18
-14 22
-15 6
-15 28
-16 15
-16 18
-17 6
-17 14
-17 22
-18 3
-19 6
-19 12
-19 24
-20 4
-20 7
-20 11
-21 13
-21 14
-22 4
-22 17
-23 4
-23 16
-23 20
-23 29
-24 1
-24 20
-24 27
-24 28
-25 10
-25 18
-26 9
-26 29
-27 10
-27 18
-28 8
-28 11
-28 27
-29 11
-29 17
-29 21
-30 9
-30 11
-30 16
-30 19""".split("\n")
-
 if __name__ == '__main__':
-    # res = generate_expressions(*process_input(test_lines_1()))
     res = generate_expressions(*process_input())
-    print(res_to_string(res))
+    if res in PREDEFINED_SOLUTIONS:
+        print(res)
+    else:
+        print(res_to_string(res))
